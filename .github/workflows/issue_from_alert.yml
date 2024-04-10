@@ -24,12 +24,13 @@ jobs:
         run: |
           echo "::set-output name=issueType::${{ github.event.inputs.issueType }}"
           echo "::set-output name=issueDescription::${{ github.event.inputs.issueDescription }}"
+
       - name: Print Alert Details
         run: |
           echo "Simulating New Relic Alert..."
           echo "Issue Type: ${{ steps.set-vars.outputs.issueType }}"
           echo "Issue Description: ${{ steps.set-vars.outputs.issueDescription }}"
-  
+
   create-jira-ticket:
     needs: simulate-alert
     runs-on: ubuntu-latest
@@ -40,25 +41,45 @@ jobs:
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
         run: |
-          echo "Creating Jira Ticket..."
           ISSUE_TYPE="${{ needs.simulate-alert.outputs.issueType }}"
           ISSUE_DESCRIPTION="${{ needs.simulate-alert.outputs.issueDescription }}"
+          
+          # Use jq to properly encode variables into JSON values and comply with ADF for the description
+          JSON_PAYLOAD=$(jq -n \
+                            --arg issueType "$ISSUE_TYPE" \
+                            --arg issueDescription "$ISSUE_DESCRIPTION" \
+                            '{
+                              fields: {
+                                project: {
+                                  key: "ANOMALIES"
+                                },
+                                summary: ("Automated Alert: " + $issueType),
+                                description: {
+                                  "type": "doc",
+                                  "version": 1,
+                                  "content": [
+                                    {
+                                      "type": "paragraph",
+                                      "content": [
+                                        {
+                                          "type": "text",
+                                          "text": $issueDescription
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                issuetype: {
+                                  name: "Task"
+                                }
+                              }
+                            }')
+          
           RESPONSE=$(curl --request POST \
           --url "${JIRA_BASE_URL}/rest/api/3/issue" \
           --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
           --header 'Accept: application/json' \
           --header 'Content-Type: application/json' \
-          --data '{
-            "fields": {
-              "project":
-              {
-                "key": "${{ secrets.JIRA_PROJECT_KEY }}
-              },
-              "summary": "Automated Alert: '"$ISSUE_TYPE"'",
-              "description": "Detected Issue: '"$ISSUE_DESCRIPTION"'",
-              "issuetype": {
-                "name": "Task"
-              }
-            }
-          }')
+          --data "$JSON_PAYLOAD")
+          
           echo "Response: $RESPONSE"
