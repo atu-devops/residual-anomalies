@@ -1,0 +1,64 @@
+name: Simulate New Relic Alert and Create Jira Ticket
+
+on:
+  workflow_dispatch:
+    inputs:
+      issueType:
+        description: 'Type of Issue (e.g., Performance, Security)'
+        required: true
+        default: 'Performance'
+      issueDescription:
+        description: 'Description of the Issue'
+        required: true
+        default: 'Performance degradation detected in the payment processing module.'
+
+jobs:
+  simulate-alert:
+    runs-on: ubuntu-latest
+    outputs:
+      issueType: ${{ steps.set-vars.outputs.issueType }}
+      issueDescription: ${{ steps.set-vars.outputs.issueDescription }}
+    steps:
+      - name: Set Variables
+        id: set-vars
+        run: |
+          echo "::set-output name=issueType::${{ github.event.inputs.issueType }}"
+          echo "::set-output name=issueDescription::${{ github.event.inputs.issueDescription }}"
+      - name: Print Alert Details
+        run: |
+          echo "Simulating New Relic Alert..."
+          echo "Issue Type: ${{ steps.set-vars.outputs.issueType }}"
+          echo "Issue Description: ${{ steps.set-vars.outputs.issueDescription }}"
+  
+  create-jira-ticket:
+    needs: simulate-alert
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Jira Ticket
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+        run: |
+          echo "Creating Jira Ticket..."
+          ISSUE_TYPE="${{ needs.simulate-alert.outputs.issueType }}"
+          ISSUE_DESCRIPTION="${{ needs.simulate-alert.outputs.issueDescription }}"
+          RESPONSE=$(curl --request POST \
+          --url "${JIRA_BASE_URL}/rest/api/3/issue" \
+          --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+          --header 'Accept: application/json' \
+          --header 'Content-Type: application/json' \
+          --data '{
+            "fields": {
+              "project":
+              {
+                "key": "${{ secrets.JIRA_PROJECT_KEY }}
+              },
+              "summary": "Automated Alert: '"$ISSUE_TYPE"'",
+              "description": "Detected Issue: '"$ISSUE_DESCRIPTION"'",
+              "issuetype": {
+                "name": "Task"
+              }
+            }
+          }')
+          echo "Response: $RESPONSE"
