@@ -66,18 +66,43 @@ jobs:
           JIRA_TICKET_ID="${{ needs.create-jira-ticket.outputs.jiraTicketId }}"
           # Define the document variables
           ANOMALY_TITLE="Simulated Anomaly ${JIRA_TICKET_ID}"
-          DATE=$(date +'%Y-%m-%d')
           VERSION_NUMBER="1.0"
+          DETECTION_DATE="2024-04-21"
           DETECTION_SOURCE="Simulated New Relic Alert"
           ISSUE_DESCRIPTION="This is a simulated description based on New Relic data."
+          IMPACT_SUMMARY="This is a low-impact anomaly that is not affecting the application's performance."
+          AFFECTED_COMPONENTS="Payment Processing Module"
+          POTENTIAL_HARM="No potential harm is expected from this anomaly."
+          COMPLIANCY_RISK="No compliancy risk is associated with this anomaly."
+          RISK_LEVEL="Low"
+          JUSTIFICATION="This anomaly is not affecting the application's performance and is not expected to cause any harm."
+          STANDARDS_REFERENCE="N/A"
+          PROPOSED_MITIGATION="No mitigation is required for this anomaly."
+          RESPONSIBLE_TEAM="DevOps Team"
+          IMPLEMENTATION_PLAN="No implementation plan is required for this anomaly."
+          IMPLEMENTATION_DATE="N/A"
+          RESIDUAL_RISK="No residual risk is associated with this anomaly."
 
-          # Prepare the content with variables included
+          # Prepare the HTML content with variables included
           PAGE_CONTENT="<h2>Anomaly Title: ${ANOMALY_TITLE}</h2>
-                        <p>Date: ${DATE}</p>
+                        <p>Date Detected: ${DETECTION_DATE}</p>
                         <p>Version Number: ${VERSION_NUMBER}</p>
                         <p>Detection Source: ${DETECTION_SOURCE}</p>
-                        <p>Issue Description: ${ISSUE_DESCRIPTION}</p>"
-
+                        <p>Issue Description: ${ISSUE_DESCRIPTION}</p>
+                        <p>Impact Summary: ${IMPACT_SUMMARY}</p>
+                        <p>Affected Components: ${AFFECTED_COMPONENTS}</p>
+                        <p>Potential Harm: ${POTENTIAL_HARM}</p>
+                        <p>Compliancy Risk: ${COMPLIANCY_RISK}</p>
+                        <p>Risk Level: ${RISK_LEVEL}</p>
+                        <p>Justification: ${JUSTIFICATION}</p>
+                        <p>Standards Reference: ${STANDARDS_REFERENCE}</p>
+                        <p>Proposed Mitigation: ${PROPOSED_MITIGATION}</p>
+                        <p>Responsible Team: ${RESPONSIBLE_TEAM}</p>
+                        <p>Implementation Plan: ${IMPLEMENTATION_PLAN}</p>
+                        <p>Implementation Date: ${IMPLEMENTATION_DATE}</p>
+                        <p>Residual Risk: ${RESIDUAL_RISK}</p>"
+          
+          
           JSON_PAYLOAD=$(jq -n \
                             --arg title "Risk Management Report #$JIRA_TICKET_ID" \
                             --arg content "$PAGE_CONTENT" \
