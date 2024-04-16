@@ -1,24 +1,35 @@
-name: Incident Documentation Workflow
+name: Complete Residual Anomaly Workflow
 
 on:
   workflow_dispatch:
     inputs:
-      issueType:
-        description: 'Type of Issue (e.g., Performance, Security)'
+      application_description:
+        description: 'Description of the application.'
         required: true
-        default: 'Performance'
-      issueDescription:
-        description: 'Description of the Issue'
+      simulated_alert:
+        description: 'Details of the simulated New Relic alert.'
         required: true
-        default: 'Performance degradation detected in the payment processing module.'
 
 jobs:
-  create-jira-ticket:
+  simulate_error:
     runs-on: ubuntu-latest
     outputs:
-      jiraTicketId: ${{ steps.create_ticket.outputs.jiraTicketId }}
+      application_description: ${{ secrets.APPLICATION_DESCRIPTION }}
+      simulated_alert: ${{ secrets.SIMULATED_ALERT }}
     steps:
-      - name: Create Jira Ticket
+      - name: Set Variables
+        id: set_vars
+        run: |
+          echo "::set-output name=application_description::${{ github.event.inputs.application_description }}"
+          echo "::set-output name=simulated_alert::${{ github.event.inputs.simulated_alert }}"
+
+  create_jira_ticket:
+    needs: simulate_error
+    runs-on: ubuntu-latest
+    outputs:
+      jira_ticket_id: ${{ steps.create_ticket.outputs.jira_ticket_id }}
+    steps:
+      - name: Create JIRA Ticket
         id: create_ticket
         env:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
@@ -32,8 +43,8 @@ jobs:
             --header 'Content-Type: application/json' \
             --data '{
               "fields": {
-                "project": { "key": "ANOMALIES" },
-                "summary": "${{ github.event.inputs.issueType }}",
+                "project": {"key": "SD"},
+                "summary": "Review needed for simulated anomaly",
                 "description": {
                   "type": "doc",
                   "version": 1,
@@ -41,76 +52,229 @@ jobs:
                     {
                       "type": "paragraph",
                       "content": [
-                        { "type": "text", "text": "${{ github.event.inputs.issueDescription }}" }
+                        {
+                          "type": "text",
+                          "text": "An anomaly has been detected requiring further analysis."
+                        }
                       ]
                     }
                   ]
                 },
-                "issuetype": { "name": "Task" }
+                "issuetype": {"name": "Bug"}
               }
             }')
           echo "$RESPONSE"
           JIRA_TICKET_ID=$(echo $RESPONSE | jq -r '.id')
-          echo "::set-output name=jiraTicketId::$JIRA_TICKET_ID"
+          echo "::set-output name=jira_ticket_id::$JIRA_TICKET_ID"
 
-  create-confluence-page:
-    needs: create-jira-ticket
+  ai_risk_assessment:
+    needs: create_jira_ticket
+    runs-on: ubuntu-latest
+    outputs:
+      chatgpt_response: ${{ steps.generate_risk_assessment.outputs.chatgpt_response }} # Correct output mapping
+    steps:
+      - name: Generate Risk Assessment with ChatGPT
+        id: generate_risk_assessment # Add step ID for referencing the output
+        run: |
+          API_KEY="${{ secrets.CHAT_GPT_API_KEY }}"
+          APPLICATION_DESCRIPTION="${{ needs.simulate_error.outputs.application_description }}"
+          SIMULATED_ALERT="${{ needs.simulate_error.outputs.simulated_alert }}"
+
+          PROMPT="Given an application described as: $APPLICATION_DESCRIPTION and a recent alert reported as: $SIMULATED_ALERT, please carry out a risk assessment and provide the following details in JSON format: - Anomaly Title - Detection Date - Issue Description - Impact Summary - Affected Components - Potential Harm - Compliance Risk - Risk Level - Proposed Mitigation - Justification - Standards Reference - Responsible Team - Implementation Plan - Implementation Date - Residual Risk"
+
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $API_KEY" \
+            -d "{
+              \"model\": \"gpt-3.5-turbo\",
+              \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}],
+              \"temperature\": 0.7
+            }")
+
+          if [ $? -ne 0 ]; then
+            echo "API call failed."
+            exit 1
+          fi
+
+          # Ensure the response is complete
+          echo "Raw Response: $RESPONSE"
+
+          # Base64 encode the response to ensure it's handled safely
+          ENCODED_RESPONSE=$(echo "$RESPONSE" | base64 -w 0)
+          echo ::set-output name=chatgpt_response::$ENCODED_RESPONSE
+        env:
+          CHAT_GPT_API_KEY: ${{ secrets.CHAT_GPT_API_KEY }}
+
+  ai_mitigation_assessment:
+    needs: create_jira_ticket
+    runs-on: ubuntu-latest
+    outputs:
+      chatgpt_response: ${{ steps.generate_mitigation_assessment.outputs.chatgpt_response }} # Correct output mapping
+    steps:
+      - name: Generate Mitigation Assessment with ChatGPT
+        id: generate_mitigation_assessment
+        run: |
+          API_KEY="${{ secrets.CHAT_GPT_API_KEY }}"
+          APPLICATION_DESCRIPTION="${{ needs.simulate_error.outputs.application_description }}"
+          SIMULATED_ALERT="${{ needs.simulate_error.outputs.simulated_alert }}"
+
+          PROMPT="Given an application described as: ${APPLICATION_DESCRIPTION} and a recent alert reported as: ${SIMULATED_ALERT}, please provide a detailed mitigation report in JSON format that includes the following details: - Mitigation Title - Mitigation Date - Detailed Mitigation Steps - Expected Outcomes - Tools and Resources Required - Responsible Team - Timeframe for Implementation - Evaluation Methods - Follow-up Actions - Residual Risk after Implementation - Compliance Adjustments - Documentation Updates Required - Approval Status - Contact Information for Implementation Lead"
+    
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $API_KEY" \
+              -d "{
+                \"model\": \"gpt-3.5-turbo\",
+                \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}],
+                \"temperature\": 0.7
+              }")
+  
+            if [ $? -ne 0 ]; then
+              echo "API call failed."
+              exit 1
+            fi
+  
+            # Ensure the response is complete
+            echo "Raw Response: $RESPONSE"
+  
+            # Base64 encode the response to ensure it's handled safely
+            ENCODED_RESPONSE=$(echo "$RESPONSE" | base64 -w 0)
+            echo ::set-output name=chatgpt_response::$ENCODED_RESPONSE
+        env:
+          CHAT_GPT_API_KEY: ${{ secrets.CHAT_GPT_API_KEY }}
+
+  create_risk_assessment_report_page:
+    needs: ai_risk_assessment
     runs-on: ubuntu-latest
     steps:
-      - name: Create Confluence Page with Variables
-        env:
-          CONFLUENCE_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          CONFLUENCE_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          CONFLUENCE_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      - name: Create Confluence Page with Parsed Data
         run: |
-          JIRA_TICKET_ID="${{ needs.create-jira-ticket.outputs.jiraTicketId }}"
-          # Define the document variables
-          ANOMALY_TITLE="Simulated Anomaly ${JIRA_TICKET_ID}"
-          VERSION_NUMBER="1.0"
-          DETECTION_DATE="2024-04-21"
-          DETECTION_SOURCE="Simulated New Relic Alert"
-          ISSUE_DESCRIPTION="This is a simulated description based on New Relic data."
-          IMPACT_SUMMARY="This is a low-impact anomaly that is not affecting the application's performance."
-          AFFECTED_COMPONENTS="Payment Processing Module"
-          POTENTIAL_HARM="No potential harm is expected from this anomaly."
-          COMPLIANCY_RISK="No compliancy risk is associated with this anomaly."
-          RISK_LEVEL="Low"
-          JUSTIFICATION="This anomaly is not affecting the application's performance and is not expected to cause any harm."
-          STANDARDS_REFERENCE="N/A"
-          PROPOSED_MITIGATION="No mitigation is required for this anomaly."
-          RESPONSIBLE_TEAM="DevOps Team"
-          IMPLEMENTATION_PLAN="No implementation plan is required for this anomaly."
-          IMPLEMENTATION_DATE="N/A"
-          RESIDUAL_RISK="No residual risk is associated with this anomaly."
+          ENCODED_RESPONSE="${{ needs.ai_risk_assessment.outputs.chatgpt_response }}"
+          RESPONSE=$(echo "$ENCODED_RESPONSE" | base64 -d)
 
-          # Prepare the HTML content with variables included
+          echo "Original Response: $RESPONSE"
+
+          # Parsing the JSON content safely
+          PROCESSED_RESPONSE=$(echo "$RESPONSE" | jq -r .)
+          echo "Processed Response: $PROCESSED_RESPONSE"
+
+          # Using jq to extract JSON content safely
+          JSON_CONTENT=$(echo "$PROCESSED_RESPONSE" | jq -r '.choices[0].message.content | fromjson')
+          echo "Extracted JSON Content: $JSON_CONTENT"
+
+          # Individual fields extraction
+          ANOMALY_TITLE=$(echo "$JSON_CONTENT" | jq -r '.["Anomaly Title"]')
+          echo "========================="
+          echo "Anomaly Title: $ANOMALY_TITLE"
+          echo "========================="
+          DETECTION_DATE=$(echo "$JSON_CONTENT" | jq -r '.["Detection Date"]')
+          ISSUE_DESCRIPTION=$(echo "$JSON_CONTENT" | jq -r '.["Issue Description"]')
+          IMPACT_SUMMARY=$(echo "$JSON_CONTENT" | jq -r '.["Impact Summary"]')
+          AFFECTED_COMPONENTS=$(echo "$JSON_CONTENT" | jq -r '.["Affected Components"]')
+          POTENTIAL_HARM=$(echo "$JSON_CONTENT" | jq -r '.["Potential Harm"]')
+          COMPLIANCE_RISK=$(echo "$JSON_CONTENT" | jq -r '.["Compliance Risk"]')
+          RISK_LEVEL=$(echo "$JSON_CONTENT" | jq -r '.["Risk Level"]')
+          PROPOSED_MITIGATION=$(echo "$JSON_CONTENT" | jq -r '.["Proposed Mitigation"]')
+          JUSTIFICATION=$(echo "$JSON_CONTENT" | jq -r '.["Justification"]')
+          STANDARDS_REFERENCE=$(echo "$JSON_CONTENT" | jq -r '.["Standards Reference"]')
+          RESPONSIBLE_TEAM=$(echo "$JSON_CONTENT" | jq -r '.["Responsible Team"]')
+          IMPLEMENTATION_PLAN=$(echo "$JSON_CONTENT" | jq -r '.["Implementation Plan"]')
+          IMPLEMENTATION_DATE=$(echo "$JSON_CONTENT" | jq -r '.["Implementation Date"]')
+          RESIDUAL_RISK=$(echo "$JSON_CONTENT" | jq -r '.["Residual Risk"]')
+
+          # Preparing the HTML content
           PAGE_CONTENT="<h2>Anomaly Title: ${ANOMALY_TITLE}</h2>
                         <p>Date Detected: ${DETECTION_DATE}</p>
-                        <p>Version Number: ${VERSION_NUMBER}</p>
-                        <p>Detection Source: ${DETECTION_SOURCE}</p>
                         <p>Issue Description: ${ISSUE_DESCRIPTION}</p>
                         <p>Impact Summary: ${IMPACT_SUMMARY}</p>
                         <p>Affected Components: ${AFFECTED_COMPONENTS}</p>
                         <p>Potential Harm: ${POTENTIAL_HARM}</p>
-                        <p>Compliancy Risk: ${COMPLIANCY_RISK}</p>
+                        <p>Compliance Risk: ${COMPLIANCE_RISK}</p>
                         <p>Risk Level: ${RISK_LEVEL}</p>
+                        <p>Proposed Mitigation: ${PROPOSED_MITIGATION}</p>
                         <p>Justification: ${JUSTIFICATION}</p>
                         <p>Standards Reference: ${STANDARDS_REFERENCE}</p>
-                        <p>Proposed Mitigation: ${PROPOSED_MITIGATION}</p>
                         <p>Responsible Team: ${RESPONSIBLE_TEAM}</p>
                         <p>Implementation Plan: ${IMPLEMENTATION_PLAN}</p>
                         <p>Implementation Date: ${IMPLEMENTATION_DATE}</p>
                         <p>Residual Risk: ${RESIDUAL_RISK}</p>"
-          
-          
-          JSON_PAYLOAD=$(jq -n \
-                            --arg title "Risk Management Report #$JIRA_TICKET_ID" \
-                            --arg content "$PAGE_CONTENT" \
-                            '{ "type": "page", "title": $title, "space": {"key": "SD"}, "ancestors": [{"id": "229625"}], "body": { "storage": { "value": $content, "representation": "storage" } } }')
 
+          # Constructing the JSON payload for Confluence page creation
+          JSON_PAYLOAD=$(jq -n \
+                            --arg title "Risk Management Report: $ANOMALY_TITLE" \
+                            --arg content "$PAGE_CONTENT" \
+                            '{type: "page", title: $title, space: {key: "SD"}, body: {storage: {value: $content, representation: "storage"}}}')
+
+          # Creating the Confluence page
           curl --request POST \
-            --url "$CONFLUENCE_BASE_URL/wiki/rest/api/content/" \
-            --user "$CONFLUENCE_USER_EMAIL:$CONFLUENCE_API_TOKEN" \
+            --url ${{ secrets.JIRA_BASE_URL }}/wiki/rest/api/content \
+            --user ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} \
             --header 'Content-Type: application/json' \
-            --data "$JSON_PAYLOAD" \
-            --fail --silent --show-error
+            --data "$JSON_PAYLOAD"
+
+  create_mitigation_report_page:
+    needs: ai_mitigation_assessment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Mitigation Report Page with Parsed Data
+        run: |
+          ENCODED_RESPONSE="${{ needs.ai_mitigation_assessment.outputs.chatgpt_response }}"
+          RESPONSE=$(echo "$ENCODED_RESPONSE" | base64 -d)
+    
+          echo "Original Response: $RESPONSE"
+    
+          # Parsing the JSON content safely
+          PROCESSED_RESPONSE=$(echo "$RESPONSE" | jq -r .)
+          echo "Processed Response: $PROCESSED_RESPONSE"
+    
+          # Using jq to extract JSON content safely
+          JSON_CONTENT=$(echo "$PROCESSED_RESPONSE" | jq -r '.choices[0].message.content | fromjson')
+          echo "Extracted JSON Content: $JSON_CONTENT"
+    
+          # Individual fields extraction
+          MITIGATION_TITLE=$(echo "$JSON_CONTENT" | jq -r '.["Mitigation Title"]')
+          echo "========================="
+          echo "Mitigation Title: $MITIGATION_TITLE"
+          echo "========================="
+          MITIGATION_DATE=$(echo "$JSON_CONTENT" | jq -r '.["Mitigation Date"]')
+          DETAILED_STEPS=$(echo "$JSON_CONTENT" | jq -r '.["Detailed Mitigation Steps"]')
+          EXPECTED_OUTCOMES=$(echo "$JSON_CONTENT" | jq -r '.["Expected Outcomes"]')
+          TOOLS_RESOURCES=$(echo "$JSON_CONTENT" | jq -r '.["Tools and Resources Required"]')
+          RESPONSIBLE_TEAM=$(echo "$JSON_CONTENT" | jq -r '.["Responsible Team"]')
+          TIMEFRAME=$(echo "$JSON_CONTENT" | jq -r '.["Timeframe for Implementation"]')
+          EVALUATION_METHODS=$(echo "$JSON_CONTENT" | jq -r '.["Evaluation Methods"]')
+          FOLLOW_UP_ACTIONS=$(echo "$JSON_CONTENT" | jq -r '.["Follow-up Actions"]')
+          RESIDUAL_RISK=$(echo "$JSON_CONTENT" | jq -r '.["Residual Risk after Implementation"]')
+          COMPLIANCE_ADJUSTMENTS=$(echo "$JSON_CONTENT" | jq -r '.["Compliance Adjustments"]')
+          DOCUMENTATION_UPDATES=$(echo "$JSON_CONTENT" | jq -r '.["Documentation Updates Required"]')
+          APPROVAL_STATUS=$(echo "$JSON_CONTENT" | jq -r '.["Approval Status"]')
+          CONTACT_INFO=$(echo "$JSON_CONTENT" | jq -r '.["Contact Information for Implementation Lead"]')
+    
+          # Preparing the HTML content
+          PAGE_CONTENT="<h2>Mitigation Title: ${MITIGATION_TITLE}</h2>
+                        <p>Mitigation Date: ${MITIGATION_DATE}</p>
+                        <p>Detailed Mitigation Steps: ${DETAILED_STEPS}</p>
+                        <p>Expected Outcomes: ${EXPECTED_OUTCOMES}</p>
+                        <p>Tools and Resources Required: ${TOOLS_RESOURCES}</p>
+                        <p>Responsible Team: ${RESPONSIBLE_TEAM}</p>
+                        <p>Timeframe for Implementation: ${TIMEFRAME}</p>
+                        <p>Evaluation Methods: ${EVALUATION_METHODS}</p>
+                        <p>Follow-up Actions: ${FOLLOW_UP_ACTIONS}</p>
+                        <p>Residual Risk after Implementation: ${RESIDUAL_RISK}</p>
+                        <p>Compliance Adjustments: ${COMPLIANCE_ADJUSTMENTS}</p>
+                        <p>Documentation Updates Required: ${DOCUMENTATION_UPDATES}</p>
+                        <p>Approval Status: ${APPROVAL_STATUS}</p>
+                        <p>Contact Information for Implementation Lead: ${CONTACT_INFO}</p>"
+    
+          # Constructing the JSON payload for Confluence page creation
+          JSON_PAYLOAD=$(jq -n \
+                            --arg title "Mitigation Report: $MITIGATION_TITLE" \
+                            --arg content "$PAGE_CONTENT" \
+                            '{type: "page", title: $title, space: {key: "SD"}, body: {storage: {value: $content, representation: "storage"}}}')
+    
+          # Creating the Confluence page
+          curl --request POST \
+            --url ${{ secrets.JIRA_BASE_URL }}/wiki/rest/api/content \
+            --user ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} \
+            --header 'Content-Type: application/json' \
+            --data "$JSON_PAYLOAD"
