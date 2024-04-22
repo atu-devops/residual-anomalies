@@ -2,13 +2,6 @@ name: Complete Residual Anomaly Workflow
 
 on:
   workflow_dispatch:
-    inputs:
-      application_description:
-        description: 'Description of the application.'
-        required: true
-      simulated_alert:
-        description: 'Details of the simulated New Relic alert.'
-        required: true
 
 jobs:
   simulate_error:
@@ -43,7 +36,7 @@ jobs:
             --header 'Content-Type: application/json' \
             --data '{
               "fields": {
-                "project": {"key": "SD"},
+                "project": {"key": "ANOMALIES"},
                 "summary": "Review needed for simulated anomaly",
                 "description": {
                   "type": "doc",
@@ -71,10 +64,10 @@ jobs:
     needs: create_jira_ticket
     runs-on: ubuntu-latest
     outputs:
-      chatgpt_response: ${{ steps.generate_risk_assessment.outputs.chatgpt_response }} # Correct output mapping
+      chatgpt_response: ${{ steps.generate_risk_assessment.outputs.chatgpt_response }}
     steps:
       - name: Generate Risk Assessment with ChatGPT
-        id: generate_risk_assessment # Add step ID for referencing the output
+        id: generate_risk_assessment
         run: |
           API_KEY="${{ secrets.CHAT_GPT_API_KEY }}"
           APPLICATION_DESCRIPTION="${{ needs.simulate_error.outputs.application_description }}"
@@ -236,36 +229,38 @@ jobs:
           echo "========================="
           echo "Mitigation Title: $MITIGATION_TITLE"
           echo "========================="
-          MITIGATION_DATE=$(echo "$JSON_CONTENT" | jq -r '.["Mitigation Date"]')
-          DETAILED_STEPS=$(echo "$JSON_CONTENT" | jq -r '.["Detailed Mitigation Steps"]')
-          EXPECTED_OUTCOMES=$(echo "$JSON_CONTENT" | jq -r '.["Expected Outcomes"]')
-          TOOLS_RESOURCES=$(echo "$JSON_CONTENT" | jq -r '.["Tools and Resources Required"]')
-          RESPONSIBLE_TEAM=$(echo "$JSON_CONTENT" | jq -r '.["Responsible Team"]')
-          TIMEFRAME=$(echo "$JSON_CONTENT" | jq -r '.["Timeframe for Implementation"]')
-          EVALUATION_METHODS=$(echo "$JSON_CONTENT" | jq -r '.["Evaluation Methods"]')
-          FOLLOW_UP_ACTIONS=$(echo "$JSON_CONTENT" | jq -r '.["Follow-up Actions"]')
-          RESIDUAL_RISK=$(echo "$JSON_CONTENT" | jq -r '.["Residual Risk after Implementation"]')
-          COMPLIANCE_ADJUSTMENTS=$(echo "$JSON_CONTENT" | jq -r '.["Compliance Adjustments"]')
-          DOCUMENTATION_UPDATES=$(echo "$JSON_CONTENT" | jq -r '.["Documentation Updates Required"]')
-          APPROVAL_STATUS=$(echo "$JSON_CONTENT" | jq -r '.["Approval Status"]')
-          CONTACT_INFO=$(echo "$JSON_CONTENT" | jq -r '.["Contact Information for Implementation Lead"]')
-    
-          # Preparing the HTML content
+          MITIGATION_TITLE=$(echo "$JSON_CONTENT" | jq -r '."Mitigation Title"')
+          MITIGATION_DATE=$(echo "$JSON_CONTENT" | jq -r '."Mitigation Date"')
+          DETAILED_STEPS=$(echo "$JSON_CONTENT" | jq -r '."Detailed Mitigation Steps" | if type == "array" then join(" ") else . end')
+          EXPECTED_OUTCOMES=$(echo "$JSON_CONTENT" | jq -r '."Expected Outcomes"')
+          TOOLS_RESOURCES=$(echo "$JSON_CONTENT" | jq -r '."Tools and Resources Required" | if type == "array" then join(", ") else . end')
+          RESPONSIBLE_TEAM=$(echo "$JSON_CONTENT" | jq -r '."Responsible Team"')
+          TIMEFRAME=$(echo "$JSON_CONTENT" | jq -r '."Timeframe for Implementation"')
+          EVALUATION_METHODS=$(echo "$JSON_CONTENT" | jq -r '."Evaluation Methods" | if type == "array" then join(", ") else . end')
+          FOLLOW_UP_ACTIONS=$(echo "$JSON_CONTENT" | jq -r '."Follow-up Actions" | if type == "array" then join(", ") else . end')
+          RESIDUAL_RISK=$(echo "$JSON_CONTENT" | jq -r '."Residual Risk after Implementation"')
+          COMPLIANCE_ADJUSTMENTS=$(echo "$JSON_CONTENT" | jq -r '."Compliance Adjustments"')
+          DOCUMENTATION_UPDATES=$(echo "$JSON_CONTENT" | jq -r '."Documentation Updates Required" | if type == "array" then join(", ") else . end')
+          APPROVAL_STATUS=$(echo "$JSON_CONTENT" | jq -r '."Approval Status"')
+          CONTACT_INFO=$(echo "$JSON_CONTENT" | jq -r '."Contact Information for Implementation Lead" | tojson')
+        
+          # Constructing the HTML content
           PAGE_CONTENT="<h2>Mitigation Title: ${MITIGATION_TITLE}</h2>
-                        <p>Mitigation Date: ${MITIGATION_DATE}</p>
-                        <p>Detailed Mitigation Steps: ${DETAILED_STEPS}</p>
-                        <p>Expected Outcomes: ${EXPECTED_OUTCOMES}</p>
-                        <p>Tools and Resources Required: ${TOOLS_RESOURCES}</p>
-                        <p>Responsible Team: ${RESPONSIBLE_TEAM}</p>
-                        <p>Timeframe for Implementation: ${TIMEFRAME}</p>
-                        <p>Evaluation Methods: ${EVALUATION_METHODS}</p>
-                        <p>Follow-up Actions: ${FOLLOW_UP_ACTIONS}</p>
-                        <p>Residual Risk after Implementation: ${RESIDUAL_RISK}</p>
-                        <p>Compliance Adjustments: ${COMPLIANCE_ADJUSTMENTS}</p>
-                        <p>Documentation Updates Required: ${DOCUMENTATION_UPDATES}</p>
-                        <p>Approval Status: ${APPROVAL_STATUS}</p>
-                        <p>Contact Information for Implementation Lead: ${CONTACT_INFO}</p>"
-    
+          <p>Mitigation Date: ${MITIGATION_DATE}</p>
+          <p>Detailed Mitigation Steps: ${DETAILED_STEPS}</p>
+          <p>Expected Outcomes: ${EXPECTED_OUTCOMES}</p>
+          <p>Tools and Resources Required: ${TOOLS_RESOURCES}</p>
+          <p>Responsible Team: ${RESPONSIBLE_TEAM}</p>
+          <p>Timeframe for Implementation: ${TIMEFRAME}</p>
+          <p>Evaluation Methods: ${EVALUATION_METHODS}</p>
+          <p>Follow-up Actions: ${FOLLOW_UP_ACTIONS}</p>
+          <p>Residual Risk after Implementation: ${RESIDUAL_RISK}</p>
+          <p>Compliance Adjustments: ${COMPLIANCE_ADJUSTMENTS}</p>
+          <p>Documentation Updates Required: ${DOCUMENTATION_UPDATES}</p>
+          <p>Approval Status: ${APPROVAL_STATUS}</p>
+          <p>Contact Information for Implementation Lead: ${CONTACT_INFO}</p>"
+          
+          
           # Constructing the JSON payload for Confluence page creation
           JSON_PAYLOAD=$(jq -n \
                             --arg title "Mitigation Report: $MITIGATION_TITLE" \
